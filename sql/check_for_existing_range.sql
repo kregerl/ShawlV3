@@ -1,0 +1,1 @@
+SELECT * FROM public.scanned_ip_ranges WHERE addr_range = $1;
