@@ -925,6 +925,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "ipnet"
+version = "2.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8f518f335dce6725a761382244631d86cf0ccb2863413590b31338feb467f9c3"
+
+[[package]]
 name = "itoa"
 version = "1.0.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1569,18 +1575,18 @@ dependencies = [
 
 [[package]]
 name = "serde"
-version = "1.0.197"
+version = "1.0.202"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3fb1c873e1b9b056a4dc4c0c198b24c3ffa059243875552b2bd0933b1aee4ce2"
+checksum = "226b61a0d411b2ba5ff6d7f73a476ac4f8bb900373459cd00fab8512828ba395"
 dependencies = [
  "serde_derive",
 ]
 
 [[package]]
 name = "serde_derive"
-version = "1.0.197"
+version = "1.0.202"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7eb0b34b42edc17f6b7cac84a52a1c5f0e1bb2227e997ca9011ea3dd34e8610b"
+checksum = "6048858004bcff69094cd972ed40a32500f153bd3be9f716b2eed2e8217c4838"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1589,9 +1595,9 @@ dependencies = [
 
 [[package]]
 name = "serde_json"
-version = "1.0.115"
+version = "1.0.117"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "12dc5c46daa8e9fdf4f5e71b6cf9a53f2487da0e86e55808e2d35539666497dd"
+checksum = "455182ea6142b14f93f4bc5320a2b31c1f266b66a4a5c858b013302a5d8cbfc3"
 dependencies = [
  "itoa",
  "ryu",
@@ -1618,6 +1624,50 @@ dependencies = [
  "cfg-if",
  "cpufeatures",
  "digest",
+]
+
+[[package]]
+name = "shawl-common"
+version = "0.1.0"
+dependencies = [
+ "craftping",
+ "serde",
+]
+
+[[package]]
+name = "shawl-master"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "dotenv",
+ "env_logger",
+ "futures-lite 2.3.0",
+ "gethostname",
+ "lapin",
+ "log",
+ "serde_json",
+ "shawl-common",
+ "tokio",
+ "tokio-scoped",
+]
+
+[[package]]
+name = "shawl-worker"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "craftping",
+ "dotenv",
+ "env_logger",
+ "futures-lite 2.3.0",
+ "futures-util",
+ "gethostname",
+ "ipnet",
+ "lapin",
+ "log",
+ "shawl-common",
+ "tokio",
+ "tokio-scoped",
 ]
 
 [[package]]
