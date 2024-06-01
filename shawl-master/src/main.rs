@@ -45,6 +45,7 @@ async fn main() {
     let connection = Connection::connect(addr, ConnectionProperties::default())
         .await
         .unwrap();
+    // Map of worker node hostname to whether or not it has a job.
     let workers: Arc<RwLock<HashMap<String, bool>>> = Arc::new(RwLock::new(HashMap::new()));
 
     let heartbeat_read_channel = connection.create_channel().await.unwrap();
@@ -111,7 +112,7 @@ async fn main() {
             results_read_channel
                 .exchange_declare(
                     RESULTS_EXCHANGE,
-                    lapin::ExchangeKind::Direct,
+                    lapin::ExchangeKind::Fanout,
                     ExchangeDeclareOptions {
                         durable: false,
                         ..Default::default()
@@ -154,16 +155,25 @@ async fn main() {
                 .await
                 .unwrap();
 
-            while let Some(delivery) = consumer.next().await {
-                let delivery = delivery.unwrap();
-                delivery.ack(BasicAckOptions::default()).await.expect("ack");
-                let x = serde_json::from_slice::<ScanResults>(&delivery.data)
-                    .expect("Error deserializing scan results");
-                debug!("Received scan results: {:#?}", x);
-                if let Some(is_open) = workers.write().await.get_mut(&x.id) {
-                    *is_open = true;
+            loop {
+                if let Ok(Some(delivery)) =
+                    tokio::time::timeout(Duration::from_secs(1), consumer.next()).await
+                {
+                    debug!("Got delivery");
+                    let delivery = delivery.unwrap();
+                    delivery.ack(BasicAckOptions::default()).await.expect("ack");
+                    let x = serde_json::from_slice::<ScanResults>(&delivery.data)
+                        .expect("Error deserializing scan results");
+                    debug!("Received scan results: {:#?}", x);
+                    if let Some(is_open) = workers.write().await.get_mut(&x.id) {
+                        *is_open = true;
+                    }
                 }
+
             }
+            // while let Some(delivery) = consumer.next().await {
+                
+            // }
         });
     });
 }
@@ -228,10 +238,10 @@ async fn read_rabbit(
             debug!("Nodes: {:?}", nodes);
 
             let mut workers = workers.write().await;
-            // FIXME: This overrides any other conditions that might set the node `is_open` param to false.
-            //        Master will never skip the node since the heartbeat comes in before looking for nodes to write to.
             for node in nodes {
-                workers.insert(node, true);
+                if workers.get(&node).is_none() {
+                    workers.insert(node, true);
+                }
             }
 
             set.clear();

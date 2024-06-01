@@ -1,7 +1,7 @@
 use chrono::Local;
-use craftping::tokio::ping;
+use craftping::{tokio::ping, Response};
 use env_logger::Builder;
-use futures_util::{stream, StreamExt};
+use futures_util::{stream, FutureExt, StreamExt};
 use gethostname::gethostname;
 use ipnet::Ipv4Net;
 use lapin::{
@@ -13,7 +13,9 @@ use lapin::{
     BasicProperties, Channel, Connection, ConnectionProperties,
 };
 use log::debug;
-use shawl_common::{AUTOMATIC_QUEUE_NAME, HEARTBEAT_EXCHANGE, IP_RANGE_EXCHANGE};
+use shawl_common::{
+    ScanResults, AUTOMATIC_QUEUE_NAME, HEARTBEAT_EXCHANGE, IP_RANGE_EXCHANGE, RESULTS_EXCHANGE,
+};
 use std::{io::Write, net::Ipv4Addr, str::FromStr, thread, time::Duration};
 use tokio::net::TcpStream;
 
@@ -45,6 +47,7 @@ async fn main() {
 
     let heartbeat_write_channel = connection.create_channel().await.unwrap();
     let ip_range_read_channel = connection.create_channel().await.unwrap();
+    let results_write_channel = connection.create_channel().await.unwrap();
 
     tokio_scoped::scope(|scope| {
         scope.spawn(async {
@@ -73,6 +76,19 @@ async fn main() {
                 .await
                 .unwrap();
 
+            results_write_channel
+                .exchange_declare(
+                    RESULTS_EXCHANGE,
+                    lapin::ExchangeKind::Fanout,
+                    ExchangeDeclareOptions {
+                        durable: false,
+                        ..Default::default()
+                    },
+                    FieldTable::default(),
+                )
+                .await
+                .unwrap();
+
             let mut basic_options = BasicConsumeOptions::default();
             basic_options.no_ack = true;
             let mut consumer = ip_range_read_channel
@@ -84,7 +100,7 @@ async fn main() {
                 )
                 .await
                 .unwrap();
-                // jEFF WAS HERE
+            // jEFF WAS HERE
             loop {
                 if let Ok(Some(delivery)) =
                     tokio::time::timeout(Duration::from_secs(1), consumer.next()).await
@@ -95,19 +111,52 @@ async fn main() {
                     debug!("Worker received ip range: {}", ip_range_str);
 
                     let ip_range = Ipv4Net::from_str(&ip_range_str).unwrap();
-                    let x = stream::iter(ip_range.hosts())
-                        .for_each_concurrent(CONCURRENCY, |addr| scan_ports(addr))
-                        .await;
+
+                    let mut futures = Vec::new();
+                    for host in ip_range.hosts() {
+                        futures.push(scan_ports(host));
+                    }
+                    let responses = stream::iter(futures)
+                        .buffer_unordered(CONCURRENCY)
+                        .collect::<Vec<Vec<Response>>>()
+                        .await
+                        .into_iter()
+                        .flatten()
+                        .collect::<Vec<Response>>();
+
+                    let hostname = gethostname::gethostname().into_string().unwrap();
+                    let payload = ScanResults {
+                        id: hostname,
+                        servers: responses,
+                    };
+                    debug!(
+                        "Done scanning, sending to the results exchange: {:#?}",
+                        payload
+                    );
+                    let bytes =
+                        serde_json::to_vec(&payload).expect("Error converting payload to bytes");
+                    let x = results_write_channel
+                        .basic_publish(
+                            RESULTS_EXCHANGE,
+                            "",
+                            BasicPublishOptions::default(),
+                            &bytes,
+                            BasicProperties::default(),
+                        )
+                        .await
+                        .unwrap();
+                    debug!("Done sending: {:#?}", x);
                 }
             }
         });
     });
 }
 
-async fn scan_ports(addr: Ipv4Addr) {
+async fn scan_ports(addr: Ipv4Addr) -> Vec<Response> {
     let ports = vec![25560];
 
     let address = addr.to_string();
+    let mut responses = Vec::new();
     for port in ports {
         debug!("Scanning addr: {}:{}", address, port);
         if let Ok(Ok(mut stream)) = tokio::time::timeout(
@@ -116,12 +165,14 @@ async fn scan_ports(addr: Ipv4Addr) {
         )
         .await
         {
-            let pong = ping(&mut stream, &address, port)
-                .await
-                .expect("Cannot ping server");
+            let pong = ping(&mut stream, &address, port).await;
             debug!("Ping result: {:?}", pong);
+            if let Ok(result) = pong {
+                responses.push(result);
+            }
         }
     }
+    responses
 }
 
 async fn heartbeat(channel: Channel) -> lapin::Result<()> {
